@@ -13,15 +13,28 @@ APP_NAME = "egodiversity"
 VOLUME_NAME = "egodiversity-cache"
 SECRET_NAME = "egoverse-creds"
 
-# Expected env vars in the `egoverse-creds` Modal Secret. These are generic
-# placeholders for now; real EgoVerse-specific credential names get
-# reconciled once sync_s3.py / S3EpisodeResolver are wired up.
-EXPECTED_SECRET_KEYS = [
-    "AWS_ACCESS_KEY_ID",
-    "AWS_SECRET_ACCESS_KEY",
-    "AWS_REGION",
-    "DB_URL",
+# Env vars expected in the `egoverse-creds` Modal Secret, matching exactly
+# what EgoVerse's own `egomimic/utils/aws/setup_secret.sh` writes to
+# `~/.egoverse_env` (see CONTRIBUTING_DATA.md / README "AWS Configure").
+# Use `scripts/push_egoverse_secret.sh` to create this secret from that file.
+#
+# R2_* / *_ENDPOINT_URL / BUCKET are always present (R2 object storage
+# access, works for both the internal and public-fallback credential tiers).
+REQUIRED_SECRET_KEYS = [
+    "R2_ACCESS_KEY_ID",
+    "R2_SECRET_ACCESS_KEY",
+    "AWS_ENDPOINT_URL_S3",
+    "AWS_DEFAULT_REGION",
+    "BUCKET",
 ]
+# SECRETS_ARN is only written when the RL2-internal (or public read-only)
+# Postgres secret was reachable; R2_SESSION_TOKEN only appears for
+# session-scoped (STS) R2 credentials. Both are optional.
+OPTIONAL_SECRET_KEYS = [
+    "SECRETS_ARN",
+    "R2_SESSION_TOKEN",
+]
+EXPECTED_SECRET_KEYS = REQUIRED_SECRET_KEYS + OPTIONAL_SECRET_KEYS
 
 # Volume-backed cache layout, shared by all pipeline stages.
 CACHE_ROOT = "/cache"
@@ -49,9 +62,10 @@ def healthcheck() -> dict:
 
     Creates the cache subdirectories on the mounted Volume, commits the
     Volume, and reports which expected credential env vars are present
-    (without leaking their values). Used as a smoke test that the App,
-    Volume, and Secret are all correctly configured before any real
-    pipeline stage is built on top of them.
+    (without leaking their values), flagging whether any required key is
+    missing. Used as a smoke test that the App, Volume, and Secret are all
+    correctly configured before any real pipeline stage is built on top of
+    them.
     """
     import os
 
@@ -59,11 +73,16 @@ def healthcheck() -> dict:
         os.makedirs(directory, exist_ok=True)
     volume.commit()
 
+    secrets_present = {key: key in os.environ for key in EXPECTED_SECRET_KEYS}
+    missing_required = [key for key in REQUIRED_SECRET_KEYS if not secrets_present[key]]
+
     return {
         "app": APP_NAME,
         "volume_root": CACHE_ROOT,
         "cache_dirs": [EPISODES_DIR, EMBEDDINGS_DIR, RESULTS_DIR],
-        "secrets_present": {key: key in os.environ for key in EXPECTED_SECRET_KEYS},
+        "secrets_present": secrets_present,
+        "missing_required_secrets": missing_required,
+        "ok": not missing_required,
     }
 
 

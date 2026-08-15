@@ -4,12 +4,12 @@
 
 ## Todos
 
-- [ ] Set up Modal app skeleton: App, Volume, Secret for EgoVerse AWS/DB creds
+- [x] Set up Modal app skeleton: App, Volume, Secret for EgoVerse AWS/DB creds
 - [ ] Implement Modal function to pull filtered EgoVerse subsets via sync_s3.py/S3EpisodeResolver into a cached Volume
 - [ ] Implement GPU Modal function: frame sampling + frozen DINOv2 embedding extraction per episode
 - [ ] Implement CPU function: kinematic feature extraction from hand keypoints + head pose
 - [ ] Implement metadata distribution extraction (task/scene/object/demonstrator) from SQL sidecar
-- [ ] Implement diversity/metrics.py: Vendi Score, Hill numbers, bootstrap CI, permutation test, composite index
+- [x] Implement diversity/metrics.py: Vendi Score, Hill numbers, bootstrap CI, permutation test, composite index
 - [ ] Build FastAPI /presets and /compare endpoints as a Modal asgi_app, with result caching
 - [ ] Build React/Vite/Tailwind dashboard: subset selector, headline score card, axis breakdown chart, UMAP scatter, rarefaction curve, drill-down table
 - [ ] Run demonstrator-count-scaling validation experiment replicating paper Fig 11/12 as a sanity check
