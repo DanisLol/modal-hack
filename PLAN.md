@@ -56,6 +56,17 @@ flowchart LR
 
 ## 2. Dataset access
 
+### 2.0 EgoVerse integration strategy (do not install the full training repo)
+
+The EgoVerse repo's own `requirements.txt`/`pyproject.toml` targets **policy training**, not data reading: it pulls in `torch`, `projectaria-tools[all]`, `mujoco`, `dm-control`, `mink`, `ray`, `hydra-core` + `hydra-submitit-launcher`, `lightning`, `scaleapi`, `openai`, etc. None of that is needed to compute a diversity score, and running `uv venv` / `uv pip install -r requirements.txt` locally does not help the Modal deployment anyway, since Modal builds its own container images independent of any local venv.
+
+Instead:
+
+- **Credentials (one-time, local, by hand):** clone EgoVerse just long enough to run `aws configure` (using the demo `AccessKeyId`/`SecretAccessKey` from the repo README) and `bash egomimic/utils/aws/setup_secret.sh`. Per `CONTRIBUTING_DATA.md`, this script tries the RL2-internal AWS Secrets Manager entries first and **automatically falls back to public, read-only DB (`rds/appdb/appuser-readonly`) and R2 (`r2/rldb/public/credentials`) secrets** if internal access is denied — so this one script works for external/hackathon use and yields both read-only Postgres metadata access and R2/S3 zarr access, written to `~/.egoverse_env`. Take that file's contents and create a `modal.Secret` from it (`modal secret create egoverse-creds ...`) so no container ever needs the AWS CLI or Secrets Manager access again.
+- **Only one Modal function (`ingest_episodes`) imports EgoVerse code.** Its `modal.Image` installs the package with `--no-deps` (skipping the whole training/sim dependency tree) plus the handful of light packages the data-access path actually needs (traced through `aws_sql.py` → `aws_data_utils.py` → `filters.py` → `zarr_dataset_multi.py` → `embodiment.py`): `numpy`, `torch`, `zarr==3.1.5`, `boto3`, `cloudpathlib`, `sqlalchemy`, `psycopg[binary]`, `pandas`, `simplejpeg`. From there we reuse `DatasetFilter`, `create_default_engine`, `episode_table_to_df`, and `TableRow` to resolve matching episodes and download their `.zarr` stores from R2 into a `modal.Volume`, cached by `episode_hash`.
+- **Every other function** (visual embeddings, motion features, Vendi scoring, FastAPI) uses a separate, slim image and only reads the already-downloaded `.zarr` files directly with `zarr`/`numpy`/`torch` — no EgoVerse import, no MuJoCo/Ray/Hydra/Lightning bloat, faster cold starts.
+- We do **not** hand-copy EgoVerse source files into our repo; we depend on the real package (pinned to a commit) via `pip install git+https://github.com/GaTech-RL2/EgoVerse.git@<commit>` so we track their schema (e.g. the mandatory-intrinsics change) instead of silently drifting from it.
+
 EgoVerse (`GaTech-RL2/EgoVerse`) stores each episode as a Zarr store (`images.front_1`, `left/right.obs_ee_pose`, `obs_head_pose`, optional `*.obs_keypoints`, `annotations`, `intrinsics` in `zarr.json`), indexed by a Postgres `app.episodes` table with columns `episode_hash, lab, task, embodiment, rig_name, task_description, scene, objects, num_frames, zarr_processed_path`. Access is via:
 
 - `egomimic/scripts/data_download/sync_s3.py --local-dir <dir> --filters <preset>` (uses `DatasetFilter` lambdas over the SQL row, e.g. `embodiment == 'aria'`, `task == 'fold_clothes'`) — this is our primary ingestion mechanism, run inside a Modal function.
